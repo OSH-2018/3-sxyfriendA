@@ -10,8 +10,7 @@
        char filename[40];//name
 	     int32_t filenode_num;//编号
 	     int32_t used_num;//本块中已使用的页的个数 
-       struct stat st;//文件信息
-       struct filenode *next_file;//指向下一个文件的文件信息
+       struct stat st;//文件信息       struct filenode *next_file;//指向下一个文件的文件信息
        int32_t data[(BLOCK_SIZE-300)/4];//总存储量约1G(不足)
        };//filenode 
       
@@ -22,7 +21,6 @@ data block中为文件数据每块中存储数据恰为64k，每个文件的存�
 ## 函数
 
 oshfs_init 用于创建文件系统，初始化超级块
-
 oshfs_getattr用于获取文件信息
 
 oshfs_reddir用于获取所有文件的filename
@@ -66,6 +64,6 @@ find_empty_data_block,设置全局变量存储最新增加的data block的编号
 4、inode block存在，便于维护、修改文件的各种原信息，当前filenode结点中仍存在约100字节的位置，可供文件信息的拓展
 
 ## 附
-1、开始时先实现的为Linux中文件管理系统的模式，在inode之间新增加一个链表，用next_block指针相连，通过这种方式可以使得单一文件可以同时具有多个文件结点，通过这种方法，可以使得能处理的文件大小上线提高。
+1、开始时先实现的为Linux中文件管理系统的模式，在inode之间新增加一个链表，用next_block指针相连，通过这种方式可以使得单一文件可以同时具有多个文件结点，通过这种方法，可以使得能处理的文件大小上线提高，实现时发现read和write函数中关于offset和size的数据结点位置处理较为麻烦……中途放弃，改为每个文件只是用一个结点
 
 2、鉴于能处理的最大文件大小，无法处理当前示例代码中的2GB的文件，但当将2000改为1000后示例代码可正常执行。
