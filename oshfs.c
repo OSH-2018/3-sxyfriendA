@@ -12,6 +12,7 @@
 struct filenode {
     char filename[40];//name
 	int32_t filenode_num;//编号
+	int32_t next_num;
 	int32_t used_num;//本块中已使用的页的个数 
     struct stat st;//文件信息
     struct filenode *next_file;//指向下一个文件的文件信息
@@ -25,15 +26,20 @@ struct filenode {
 static const size_t size = 4 * 1024 * 1024 * (size_t)1024;//总大小为4G 
 static void *mem[64 * 1024] ;//指向页的point 
 
-static struct filenode *root = NULL;//root指向最新建立的的文件的第一页
+//static struct filenode *root = NULL;//root指向最新建立的的文件的第一页
 int datablock_num_now = 128;//当前处理的datablock的编码 
-
+	
 static struct filenode *get_filenode(const char *name)
 {
-    struct filenode *node = root;
-    while(node) {
+    struct filenode *node = (struct filenode*)mem[*( (int32_t*)mem[0] + 5 )];//point to root
+	if(*( (int32_t*)mem[0] + 5 )==0)//don't have file
+	return NULL;
+    while(node->filenode_num) {
         if(strcmp(node->filename, name + 1) != 0)
-            node = node->next_file;
+	    {
+			if(node->next_num) break;       //the next inode block is the super block break.
+            else node = node->next_file;
+		}
         else
             return node;
     }
@@ -92,6 +98,8 @@ static void create_filenode(const char *filename, const struct stat *st)
 	if (k<=0 || k>128) {
 		return;
 	}//错误情况结束该函数 
+	if(mem[k]==NULL)
+	return ;
 	struct filenode *new = (struct filenode *)mem[k];	
 	strcpy(new->filename, filename);//复制文件名
 	memcpy(&(new->st), st, sizeof(struct stat));//复制文件属性
@@ -99,8 +107,10 @@ static void create_filenode(const char *filename, const struct stat *st)
 	new->used_num = 0;
 	new->filenode_num = k; 
 //	new->next_block  = NULL;
-	new->next_file = root;	
-	root = new;//采用头插法，新节点插在根节点之前
+    new->next_num = *( (int32_t*)mem[0] + 5 );
+	new->next_file = (struct filenode*)mem[*( (int32_t*)mem[0] + 5 )];	
+    *((int32_t*)mem[0] + 5 ) = new->filenode_num;//采用头插法，新节点插在根节点之前
+	
 }
 
 int realloc_block(struct filenode *node,int n)//块重新分配,n3为分配后所需文件属性块个数 
@@ -119,12 +129,15 @@ int realloc_block(struct filenode *node,int n)//块重新分配,n3为分配后�
 		for (i=m;i<n;i++) 
 		{//再分配n-m个块 
 			k=find_empty_data_block();
+			if(k==-1) return -ENOSPC;
+			if(mem[k]==NULL) return -ENOMEM;
 			node->data[i]=k;
 		}//分配新增的块
+		node->used_num=n;
 	}
 	else if(m==n) ;
 	else
-	{//如果要求的空间比已有的小，释放多余的空间 
+	{ 
 		for (i=n;i<m;i++)//共删去m-n块 
 		{ 
 		    int t = node->data[i];
@@ -140,16 +153,38 @@ int realloc_block(struct filenode *node,int n)//块重新分配,n3为分配后�
 	return 0;
 }
 
+/*int short_block(struct filenode *node,int n)
+{
+	int m = node->used_num;//原文件存储所需要的数据块数
+	int i,k=0;
+	//struct filenode *temp = node;
+	int num=0;
+	//int p;//p为所要删除的块 
+		for (i=n;i<m;i++)//共删去m-n块 
+		{ 
+		    int t = node->data[i];
+			memset(mem[t], 0, BLOCK_SIZE);
+		    munmap(mem[t], BLOCK_SIZE);
+		    mem[t] = NULL ;
+			node->data[i] = 0;
+			*( (int32_t*)mem[0] + 3 ) += 1 ;//数据块剩余量+1； 
+		}
+		node->used_num=n;
+
+	return 0; 
+}*/
 static void *oshfs_init(struct fuse_conn_info *conn)
 {
 		mem[0] = mmap(NULL, BLOCK_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		//if(mem[0]==NULL)return -ENOMEM;
 		memset(mem[0], 0, BLOCK_SIZE);
     //将第一个块设置为超级块，用于存放文件系统的各种属性 
 	*( (int32_t*)mem[0] + 0 ) = BLOCK_SIZE ;  //第一个整数保存每块的大小 
 	*( (int32_t*)mem[0] + 1 ) = BLOCK_NUM ;   //第二个整数保存块数
 	*( (int32_t*)mem[0] + 2 ) = 1+IBLOCK_NUM; //第三个整数保存使用量
 	*( (int32_t*)mem[0] + 3 ) = BLOCK_SIZE-1-IBLOCK_NUM; //第四个整数保存数据块剩余量
-	*( (int32_t*)mem[0] + 4 ) = IBLOCK_NUM;//第五个整数保存文件块剩余量 
+	*( (int32_t*)mem[0] + 4 ) = IBLOCK_NUM;//第五个整数保存文件块剩余量
+	*( (int32_t*)mem[0] + 5 ) = 0;//point to the newest inode block;
 	//1到128块为存储文件信息的块 
 	//除第一块外各块中各位均为0 
     return 0;
@@ -163,9 +198,12 @@ static int oshfs_getattr(const char *path, struct stat *stbuf)
     if(strcmp(path, "/") == 0) {//若路径为"/"则设置空stbuf 
         memset(stbuf, 0, sizeof(struct stat));
         stbuf->st_mode = S_IFDIR | 0755;
-    } else if(node) {//若路径不为"/"则将内存中node ->st数据拷贝到stbuff中 
+    } 
+	else if(node) 
+	{//若路径不为"/"则将内存中node ->st数据拷贝到stbuff中 
         memcpy(stbuf,&(node->st), sizeof(struct stat));
-    } else {
+    } else 
+	{
         ret = -ENOENT;
     }
     return ret;
@@ -173,11 +211,13 @@ static int oshfs_getattr(const char *path, struct stat *stbuf)
 
 static int oshfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
 {//读取目录中所有文件的信息，与示例代码相同 
-    struct filenode *node = root;
+    struct filenode *node = (struct filenode*)mem[*( (int32_t*)mem[0] + 5 )];
     filler(buf, ".", NULL, 0);
     filler(buf, "..", NULL, 0);
+	if(*( (int32_t*)mem[0] + 5 )==0) return 0;//no file
     while(node) {
         filler(buf, node->filename,&(node->st), 0);
+		if(node->next_num==0)break; //the last file
         node = node->next_file;
     }
     return 0;
@@ -203,15 +243,17 @@ static int oshfs_open(const char *path, struct fuse_file_info *fi)
 static int oshfs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
 {//改写文件内容 
 	struct filenode *node = get_filenode(path);
+	if(node==NULL)
+	return -ENOENT;
 	int i,k;
 	int m,n;
 	int offset0,seek;
-	n=(offset + size - 1)/BLOCK_SIZE+1;//计算新的大小所需要的数据块数（取上整） 
-	//p=(n-1)/(BLOCK_SIZE/32-75)+1;//计算所需的inode块个数(取上整) 
-	k=realloc_block(node,n);//重新分配文件所占的data页 
+	if(offset + size > node->st.st_size) //if new file is bigger change the file size
 	node->st.st_size = offset + size;//修改文件大小
+	n=(node->st.st_size - 1)/BLOCK_SIZE+1;//计算新的大小所需要的数据块数（取上整） 
+	k=realloc_block(node,n);//重新分配文件所占的data页
 	if (k<0) {
-		return -1;
+		return -ENOSPC;
 	}//发生错误结束 
 	m=offset/BLOCK_SIZE;//偏移位置所在的块
 	offset0=offset%BLOCK_SIZE;//块内偏移量
@@ -235,12 +277,15 @@ static int oshfs_truncate(const char *path, off_t size)//改变文件大小（�
 	int k,n;
 	n=(size - 1)/BLOCK_SIZE+1;//计算新的大小所需要的数据块数（取上整）
 	k=realloc_block(node,n);//重新分配文件所占的页
+	node->st.st_size = size;
     return 0;
 }
 
 static int oshfs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
 {
     struct filenode *node = get_filenode(path);
+	if(node==NULL)
+	return -ENOENT;
     int m,offset0,seek,ret,i;
 	m=offset/BLOCK_SIZE;//偏移位置所在的块
 	offset0=offset%BLOCK_SIZE;//块内偏移量
@@ -261,18 +306,22 @@ static int oshfs_read(const char *path, char *buf, size_t size, off_t offset, st
 static int oshfs_unlink(const char *path)
 {
     struct filenode *node = get_filenode(path);
+	if(node==NULL)
+	return -ENOENT;
     int used_number,t,k;
     int i;
-    struct filenode *temp=root; 
+    struct filenode *temp=(struct filenode*)mem[*( (int32_t*)mem[0] + 5 )]; 
 	used_number = node->used_num;//该文件使用的块的个数
 
-	if(root!=node)  //保证文件系统的链表连续 
+	if(temp!=node)  //保证文件系统的链表连续 
 	{
-		if(root->next_file != node)
-		    root=root->next_file;
-		else root->next_file=node->next_file;
+		while(temp->next_file != node)
+		    temp=temp->next_file;
+
+		temp->next_file=node->next_file;
+		temp->next_num = node->next_num;
 	}
-    else root = node->next_file;//保证根节点指向最后一个文件
+    else *( (int32_t*)mem[0] + 5 ) = node->next_num;//保证根节点指向最后一个文件
 
 	for(i=0;i<=used_number-1;i++)
 	{
