@@ -2,10 +2,14 @@
 
 ## 最新一次修改
 1、更改了write中的文件st.size的计算方法
-        if（node->st.size <offset + size）
+        
+	if（node->st.size <offset + size）
         node->st.size = offset +size;
+	
    使得其不会发生截断
+   
 2、更改了root指针相关问题，去除root指针，将文件头结点信息存储于super block的第6个位置
+
 3、更改了出错返回值，根据需要返回-ENOENT，-ENOSPC，-ENOMEM
 
 ## 文件系统结构
