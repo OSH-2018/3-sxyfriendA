@@ -27,7 +27,7 @@ static const size_t size = 4 * 1024 * 1024 * (size_t)1024;//总大小为4G
 static void *mem[64 * 1024] ;//指向页的point 
 
 //static struct filenode *root = NULL;//root指向最新建立的的文件的第一页
-int datablock_num_now = 128;//当前处理的datablock的编码 
+//int datablock_num_now = 128;//当前处理的datablock的编码 
 	
 static struct filenode *get_filenode(const char *name)
 {
@@ -71,20 +71,23 @@ int find_empty_inode_block()
 int find_empty_data_block()
 {
 	int32_t data_empty_num;  //当前数据信息块剩余个数
+	int32_t datablock_num_now;
 	int i; 
 	data_empty_num =  *((int32_t*)mem[0] + 3);
+	datablock_num_now = *((int32_t*)mem[0] + 6);
 	if(data_empty_num<=0) return -1;
 	else
 	{
 		for(i=datablock_num_now+1;i!=datablock_num_now;i++)
 		{
-			i=i%BLOCK_NUM;
+			if(i == BLOCK_NUM + 1)
+			i=128;
 			if(mem[i]==NULL)
 			{
 				datablock_num_now=i;
 				mem[i] = mmap(NULL, BLOCK_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 			    *( (int32_t*)mem[0] + 3 ) -=1;//可使用的文件数据块个数减一 
-
+                *( (int32_t*)mem[0] + 6 ) =i;//point to the neweat block
 				return i;
 			}
 		}
@@ -185,6 +188,7 @@ static void *oshfs_init(struct fuse_conn_info *conn)
 	*( (int32_t*)mem[0] + 3 ) = BLOCK_SIZE-1-IBLOCK_NUM; //第四个整数保存数据块剩余量
 	*( (int32_t*)mem[0] + 4 ) = IBLOCK_NUM;//第五个整数保存文件块剩余量
 	*( (int32_t*)mem[0] + 5 ) = 0;//point to the newest inode block;
+	*( (int32_t*)mem[0] + 6 ) = 128;//point to the newest data block
 	//1到128块为存储文件信息的块 
 	//除第一块外各块中各位均为0 
     return 0;
