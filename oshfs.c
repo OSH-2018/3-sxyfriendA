@@ -1,5 +1,6 @@
 #define FUSE_USE_VERSION 26
 #include <string.h>
+//#include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <fuse.h>
@@ -37,7 +38,8 @@ static struct filenode *get_filenode(const char *name)
     while(node->filenode_num) {
         if(strcmp(node->filename, name + 1) != 0)
 	    {
-			if(node->next_num) break;       //the next inode block is the super block break.
+			//printf("nodenum=%d,nodename=%s\n,node_next=%d",node->filenode_num,node->filename,node->next_num);
+			if(!node->next_num) break;       //the next inode block is the super block break.
             else node = node->next_file;
 		}
         else
@@ -113,7 +115,9 @@ static void create_filenode(const char *filename, const struct stat *st)
     new->next_num = *( (int32_t*)mem[0] + 5 );
 	new->next_file = (struct filenode*)mem[*( (int32_t*)mem[0] + 5 )];	
     *((int32_t*)mem[0] + 5 ) = new->filenode_num;//采用头插法，新节点插在根节点之前
-	
+	//printf("\nk=%d\n",k);
+	//printf("newest_filenode=%d\n",*((int32_t*)mem[0] + 5));
+	//printf("new_next_file=%d\n",new->next_num);
 }
 
 int realloc_block(struct filenode *node,int n)//块重新分配,n3为分配后所需文件属性块个数 
@@ -178,6 +182,7 @@ int realloc_block(struct filenode *node,int n)//块重新分配,n3为分配后�
 }*/
 static void *oshfs_init(struct fuse_conn_info *conn)
 {
+	//printf("helloworld\n");
 		mem[0] = mmap(NULL, BLOCK_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 		//if(mem[0]==NULL)return -ENOMEM;
 		memset(mem[0], 0, BLOCK_SIZE);
@@ -215,6 +220,7 @@ static int oshfs_getattr(const char *path, struct stat *stbuf)
 
 static int oshfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
 {//读取目录中所有文件的信息，与示例代码相同 
+   // printf("oshfs_readdir]\n");
     struct filenode *node = (struct filenode*)mem[*( (int32_t*)mem[0] + 5 )];
     filler(buf, ".", NULL, 0);
     filler(buf, "..", NULL, 0);
